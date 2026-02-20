@@ -524,6 +524,16 @@ document.addEventListener('DOMContentLoaded', () => {
     minTrackingConfidence: 0.85,
   });
 
+  // --- Per-hand pinch state for smoothing, hysteresis, and debounce ---
+  const PINCH_GRAB_THRESHOLD = 30;
+  const PINCH_RELEASE_THRESHOLD = 50;
+  const SMOOTHING_ALPHA = 0.35;
+  const CONFIRM_FRAMES = 5;
+
+  const smoothedPinchDist = new Map();   // handIndex → smoothed distance
+  const pinchState = new Map();          // handIndex → boolean (currently pinching?)
+  const pinchConfirmCounter = new Map(); // handIndex → frames towards state change
+
   hands.onResults((results) => {
     const w = videoCanvas.width;
     const h = videoCanvas.height;
@@ -605,12 +615,41 @@ document.addEventListener('DOMContentLoaded', () => {
 
           const dx = indexX - thumbX;
           const dy = indexY - thumbY;
-          const pinchDist = Math.sqrt(dx * dx + dy * dy);
+          const rawPinchDist = Math.sqrt(dx * dx + dy * dy);
           const midX = (indexX + thumbX) / 2;
           const midY = (indexY + thumbY) / 2;
-          const isPinching = pinchDist < 30;
 
-          if (isPinching) {
+          // --- Exponential smoothing ---
+          const prevSmoothed = smoothedPinchDist.get(handIndex) ?? rawPinchDist;
+          const smoothed = (1 - SMOOTHING_ALPHA) * prevSmoothed + SMOOTHING_ALPHA * rawPinchDist;
+          smoothedPinchDist.set(handIndex, smoothed);
+
+          // --- Hysteresis: determine raw signal based on current state ---
+          const wasPinching = pinchState.get(handIndex) ?? false;
+          let rawSignal;
+          if (wasPinching) {
+            rawSignal = smoothed < PINCH_RELEASE_THRESHOLD; // stay pinching unless exceeds release
+          } else {
+            rawSignal = smoothed < PINCH_GRAB_THRESHOLD;    // must come below grab to start
+          }
+
+          // --- Frame-count debounce on state CHANGES ---
+          let confirmedPinching = wasPinching;
+          if (rawSignal !== wasPinching) {
+            const count = (pinchConfirmCounter.get(handIndex) ?? 0) + 1;
+            if (count >= CONFIRM_FRAMES) {
+              confirmedPinching = rawSignal;
+              pinchState.set(handIndex, rawSignal);
+              pinchConfirmCounter.set(handIndex, 0);
+            } else {
+              pinchConfirmCounter.set(handIndex, count);
+            }
+          } else {
+            pinchConfirmCounter.set(handIndex, 0);
+          }
+
+          // --- Drag logic (unchanged structure) ---
+          if (confirmedPinching) {
             if (dragTile === null) {
               // PINCH START — only pick up if no tile is being dragged
               const tileIdx = getTileAtPosition(midX, midY);
@@ -619,7 +658,7 @@ document.addEventListener('DOMContentLoaded', () => {
                 playTone(600, 0.08, 0.2);
               }
             } else if (dragTile.handIndex === handIndex) {
-              // DRAGGING — update position for the hand that started the drag
+              // DRAGGING — update position with latest midpoint (no debounce on position)
               dragTile.currentX = midX;
               dragTile.currentY = midY;
             }
