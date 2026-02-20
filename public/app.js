@@ -55,6 +55,9 @@ document.addEventListener('DOMContentLoaded', () => {
     overlayCtx.clearRect(0, 0, w, h);
 
     if (results.multiHandLandmarks) {
+      overlayCtx.save();
+      overlayCtx.scale(-1, 1);
+      overlayCtx.translate(-overlayCanvas.width, 0);
       for (const landmarks of results.multiHandLandmarks) {
         drawConnectors(overlayCtx, landmarks, HAND_CONNECTIONS, {
           color: '#00FF00',
@@ -66,6 +69,7 @@ document.addEventListener('DOMContentLoaded', () => {
           radius: 4,
         });
       }
+      overlayCtx.restore();
     }
   });
 
