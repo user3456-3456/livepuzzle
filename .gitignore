@@ -1,3 +1,6 @@
+# VS Code local settings
+.vscode/
+
 # Logs
 logs
 *.log
