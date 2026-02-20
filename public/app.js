@@ -789,7 +789,17 @@ document.addEventListener('DOMContentLoaded', () => {
         overlayCtx.font = '14px Space Mono';
         overlayCtx.fillText(`${mins}:${secs}`, 8, 22);
 
+        // Safety: no hands detected — snap floating tile back
+        if (!results.multiHandLandmarks || results.multiHandLandmarks.length === 0) {
+          if (dragTile !== null) dragTile = null;
+        }
+
         if (results.multiHandLandmarks) {
+          // Safety: owning hand dropped out — snap tile back
+          if (dragTile !== null && results.multiHandLandmarks.length <= dragTile.handIndex) {
+            dragTile = null;
+          }
+
           // 5. Draw hand skeletons in mirrored space (on top of tiles)
           overlayCtx.save();
           overlayCtx.scale(-1, 1);
