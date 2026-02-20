@@ -6,6 +6,13 @@ document.addEventListener('DOMContentLoaded', () => {
 
   let appState = 'capture'; // 'capture' or 'solve'
 
+  // --- Puzzle state ---
+  let tiles = []; // {correct, current, canvas}
+  let gridX, gridY, gridW, gridH, tileW, tileH;
+  let dragTile = null; // {tileIndex, offsetX, offsetY, currentX, currentY}
+  let puzzleStartTime = null;
+  let puzzleElapsed = 0;
+
   // --- Canvas setup ---
   const videoCanvas = document.createElement('canvas');
   videoCanvas.id = 'video-canvas';
@@ -85,9 +92,109 @@ document.addEventListener('DOMContentLoaded', () => {
     startPuzzle();
   }
 
-  // --- Placeholder: puzzle phase ---
+  // --- Puzzle phase ---
   function startPuzzle() {
-    console.log("Puzzle starting");
+    const img = new Image();
+    img.src = window.capturedImage;
+    img.onload = () => {
+      // Grid: 480x480, centred on the 640x480 canvas
+      gridW = 480;
+      gridH = 480;
+      gridX = (640 - gridW) / 2; // 80
+      gridY = 0;
+      tileW = gridW / 3;
+      tileH = gridH / 3;
+
+      // Slice captured image into 9 tiles
+      tiles = [];
+      for (let i = 0; i < 9; i++) {
+        const col = i % 3;
+        const row = Math.floor(i / 3);
+        const offscreen = document.createElement('canvas');
+        offscreen.width = tileW;
+        offscreen.height = tileH;
+        const ctx = offscreen.getContext('2d');
+        ctx.drawImage(
+          img,
+          col * (img.width / 3), row * (img.height / 3),
+          img.width / 3, img.height / 3,
+          0, 0, tileW, tileH
+        );
+        tiles.push({ correct: i, current: i, canvas: offscreen });
+      }
+
+      // Shuffle: 200 random swaps (always solvable)
+      for (let s = 0; s < 200; s++) {
+        const a = Math.floor(Math.random() * 9);
+        const b = Math.floor(Math.random() * 9);
+        const temp = tiles[a].current;
+        tiles[a].current = tiles[b].current;
+        tiles[b].current = temp;
+      }
+
+      puzzleStartTime = Date.now();
+      requestAnimationFrame(drawPuzzleFrame);
+    };
+  }
+
+  // --- Puzzle render loop ---
+  function drawPuzzleFrame() {
+    if (appState !== 'solve') return;
+
+    const w = videoCanvas.width;
+    const h = videoCanvas.height;
+
+    // Update elapsed timer
+    puzzleElapsed = Math.floor((Date.now() - puzzleStartTime) / 1000);
+
+    // Clear both canvases
+    videoCtx.clearRect(0, 0, w, h);
+    overlayCtx.clearRect(0, 0, w, h);
+
+    // Draw latest mirrored camera frame onto video canvas
+    if (window._lastHandsImage) {
+      videoCtx.save();
+      videoCtx.scale(-1, 1);
+      videoCtx.drawImage(window._lastHandsImage, -w, 0, w, h);
+      videoCtx.restore();
+    }
+
+    // Draw the 9 tiles in their shuffled positions
+    for (let i = 0; i < tiles.length; i++) {
+      if (dragTile && dragTile.tileIndex === i) continue; // draw dragged tile last
+      const col = tiles[i].current % 3;
+      const row = Math.floor(tiles[i].current / 3);
+      const dx = gridX + col * tileW;
+      const dy = gridY + row * tileH;
+      overlayCtx.drawImage(tiles[i].canvas, dx, dy, tileW, tileH);
+      overlayCtx.strokeStyle = '#ffffff';
+      overlayCtx.lineWidth = 1;
+      overlayCtx.strokeRect(dx, dy, tileW, tileH);
+    }
+
+    // Draw dragged tile on top with glow
+    if (dragTile !== null) {
+      const t = tiles[dragTile.tileIndex];
+      const scale = 1.1;
+      const dw = tileW * scale;
+      const dh = tileH * scale;
+      const dx = dragTile.currentX - dw / 2;
+      const dy = dragTile.currentY - dh / 2;
+      overlayCtx.save();
+      overlayCtx.shadowBlur = 20;
+      overlayCtx.shadowColor = '#00FF00';
+      overlayCtx.drawImage(t.canvas, dx, dy, dw, dh);
+      overlayCtx.restore();
+    }
+
+    // Draw MM:SS timer top-left
+    const mins = String(Math.floor(puzzleElapsed / 60)).padStart(2, '0');
+    const secs = String(puzzleElapsed % 60).padStart(2, '0');
+    overlayCtx.fillStyle = '#00FF00';
+    overlayCtx.font = '14px Space Mono';
+    overlayCtx.fillText(`${mins}:${secs}`, 8, 22);
+
+    requestAnimationFrame(drawPuzzleFrame);
   }
 
   // --- MediaPipe Hands ---
@@ -105,6 +212,33 @@ document.addEventListener('DOMContentLoaded', () => {
   hands.onResults((results) => {
     const w = videoCanvas.width;
     const h = videoCanvas.height;
+
+    // Always cache the latest camera frame for drawPuzzleFrame
+    window._lastHandsImage = results.image;
+
+    // In solve mode, drawPuzzleFrame owns both canvases — only handle hand landmarks here
+    if (appState === 'solve') {
+      if (results.multiHandLandmarks) {
+        // Skeleton overlay is drawn by drawPuzzleFrame via the rAF loop,
+        // but we still draw landmarks onto overlayCtx for real-time feedback
+        overlayCtx.save();
+        overlayCtx.scale(-1, 1);
+        overlayCtx.translate(-overlayCanvas.width, 0);
+        for (const landmarks of results.multiHandLandmarks) {
+          drawConnectors(overlayCtx, landmarks, HAND_CONNECTIONS, {
+            color: '#00FF00',
+            lineWidth: 2,
+          });
+          drawLandmarks(overlayCtx, landmarks, {
+            color: '#FFFFFF',
+            fillColor: '#00FF00',
+            radius: 4,
+          });
+        }
+        overlayCtx.restore();
+      }
+      return;
+    }
 
     // Draw mirrored camera feed
     videoCtx.save();
