@@ -14,6 +14,8 @@ document.addEventListener('DOMContentLoaded', () => {
   let puzzleStartTime = null;
   let puzzleElapsed = 0;
 
+  window._hasSubmittedName = false;
+
   // --- Canvas setup ---
   const videoCanvas = document.createElement('canvas');
   videoCanvas.id = 'video-canvas';
@@ -240,6 +242,7 @@ document.addEventListener('DOMContentLoaded', () => {
 
     // Save personal best
     savePersonalBest(puzzleElapsed);
+    renderLeaderboardPanel(); 
 
     // Ascending completion tones
     playTone(400, 0.1, 0.2);
@@ -318,67 +321,76 @@ document.addEventListener('DOMContentLoaded', () => {
     `;
 
     // Submission UI
-    const subContainer = document.createElement('div');
-    subContainer.style.cssText = 'display: flex; flex-direction: column; align-items: center; gap: 8px; margin: 4px 0;';
+    if (!window._hasSubmittedName) {
+      const subContainer = document.createElement('div');
+      subContainer.style.cssText = 'display: flex; flex-direction: column; align-items: center; gap: 8px; margin: 4px 0;';
 
-    const nameInput = document.createElement('input');
-    nameInput.placeholder = 'ENTER NAME (OPTIONAL)';
-    nameInput.maxLength = 12;
-    nameInput.style.cssText = `
-      background: transparent;
-      border: none;
-      border-bottom: 1px solid #00FF00;
-      color: #00FF00;
-      font-family: 'Space Mono', monospace;
-      font-size: 0.6rem;
-      letter-spacing: 0.15em;
-      padding: 6px;
-      outline: none;
-      text-align: center;
-      width: 180px;
-      text-transform: uppercase;
-    `;
+      const nameInput = document.createElement('input');
+      nameInput.placeholder = 'ENTER NAME (OPTIONAL)';
+      nameInput.maxLength = 12;
+      nameInput.style.cssText = `
+        background: transparent;
+        border: none;
+        border-bottom: 1px solid #00FF00;
+        color: #00FF00;
+        font-family: 'Space Mono', monospace;
+        font-size: 0.6rem;
+        letter-spacing: 0.15em;
+        padding: 6px;
+        outline: none;
+        text-align: center;
+        width: 180px;
+        text-transform: uppercase;
+      `;
 
-    const submitBtn = document.createElement('button');
-    submitBtn.textContent = 'SUBMIT';
-    submitBtn.style.cssText = `
-      background: transparent;
-      border: 1px solid #00FF00;
-      color: #00FF00;
-      font-family: 'Space Mono', monospace;
-      font-size: 0.6rem;
-      letter-spacing: 0.2em;
-      padding: 8px 16px;
-      cursor: pointer;
-      min-height: 44px;
-      white-space: nowrap;
-    `;
+      const submitBtn = document.createElement('button');
+      submitBtn.textContent = 'SUBMIT';
+      submitBtn.style.cssText = `
+        background: transparent;
+        border: 1px solid #00FF00;
+        color: #00FF00;
+        font-family: 'Space Mono', monospace;
+        font-size: 0.6rem;
+        letter-spacing: 0.2em;
+        padding: 8px 16px;
+        cursor: pointer;
+        min-height: 44px;
+        white-space: nowrap;
+      `;
 
-    submitBtn.addEventListener('click', async () => {
-      const name = nameInput.value.trim().toUpperCase();
-      if (name) {
-        submitBtn.disabled = true;
-        submitBtn.style.opacity = '0.5';
-        submitBtn.textContent = 'SAVING...';
-        try {
-          await db.collection('leaderboard').add({
-            name: name,
-            seconds: puzzleElapsed,
-            timestamp: firebase.firestore.FieldValue.serverTimestamp()
-          });
-          submitBtn.textContent = 'SAVED';
-        } catch (e) {
-          console.error('Firestore save error:', e);
-          submitBtn.disabled = false;
-          submitBtn.style.opacity = '1';
-          submitBtn.textContent = 'RETRY';
+      submitBtn.addEventListener('click', async () => {
+        const name = nameInput.value.trim().toUpperCase();
+        if (name) {
+          submitBtn.disabled = true;
+          submitBtn.style.opacity = '0.5';
+          submitBtn.textContent = 'SAVING...';
+          try {
+            await db.collection('leaderboard').add({
+              name: name,
+              seconds: puzzleElapsed,
+              timestamp: firebase.firestore.FieldValue.serverTimestamp()
+            });
+            submitBtn.textContent = 'SAVED';
+            window._hasSubmittedName = true;
+            // Optionally remove the container instead of just disabling
+            setTimeout(() => {
+              subContainer.style.opacity = '0';
+              setTimeout(() => subContainer.remove(), 500);
+            }, 1000);
+          } catch (e) {
+            console.error('Firestore save error:', e);
+            submitBtn.disabled = false;
+            submitBtn.style.opacity = '1';
+            submitBtn.textContent = 'RETRY';
+          }
         }
-      }
-      renderLeaderboardPanel();
-    });
+        renderLeaderboardPanel();
+      });
 
-    subContainer.appendChild(nameInput);
-    subContainer.appendChild(submitBtn);
+      subContainer.appendChild(nameInput);
+      subContainer.appendChild(submitBtn);
+      card.appendChild(subContainer);
+    }
 
     // Play Again button
     const playAgainBtn = document.createElement('button');
@@ -414,7 +426,6 @@ document.addEventListener('DOMContentLoaded', () => {
     card.appendChild(trophy);
     card.appendChild(completeText);
     card.appendChild(timeDisplay);
-    card.appendChild(subContainer);
     card.appendChild(playAgainBtn);
     overlay.appendChild(card);
     document.getElementById('app').appendChild(overlay);
@@ -447,8 +458,8 @@ document.addEventListener('DOMContentLoaded', () => {
         z-index: 50;
         background: rgba(0,0,0,0.6);
         border: 1px solid #00FF00;
-        padding: 12px;
-        min-width: 140px;
+        padding: 14px 16px;
+        min-width: 180px;
         font-family: 'Space Mono', monospace;
       `;
       document.getElementById('app').appendChild(panel);
@@ -456,11 +467,11 @@ document.addEventListener('DOMContentLoaded', () => {
 
     // Header
     panel.innerHTML = `
-      <div style="color: #00FF00; font-size: 0.55rem; letter-spacing: 0.2em; margin-bottom: 8px; font-weight: 700;">TOP 5</div>
+      <div style="color: #00FF00; font-size: 0.7rem; letter-spacing: 0.2em; margin-bottom: 10px; font-weight: 700;">TOP 5</div>
       <div id="leaderboard-entries"></div>
       <div style="border-top: 1px solid rgba(0,255,0,0.3); margin: 8px 0;"></div>
-      <div style="color: rgba(0,255,0,0.6); font-size: 0.45rem; letter-spacing: 0.1em; margin-bottom: 2px;">YOUR BEST</div>
-      <div id="personal-best-display" style="color: #00FF00; font-size: 0.5rem;"></div>
+      <div style="color: rgba(0,255,0,0.6); font-size: 0.55rem; letter-spacing: 0.1em; margin-bottom: 2px;">YOUR BEST</div>
+      <div id="personal-best-display" style="color: #00FF00; font-size: 0.65rem;"></div>
     `;
 
     const entriesDiv = document.getElementById('leaderboard-entries');
@@ -488,7 +499,7 @@ document.addEventListener('DOMContentLoaded', () => {
       snapshot.docs.forEach((doc, idx) => {
         const data = doc.data();
         html += `
-          <div style="color: #00FF00; font-size: 0.5rem; line-height: 2; display: flex; justify-content: space-between;">
+          <div style="color: #00FF00; font-size: 0.65rem; line-height: 2.2; display: flex; justify-content: space-between;">
             <span>${idx + 1}. ${data.name}</span>
             <span>${formatTime(data.seconds)}</span>
           </div>
