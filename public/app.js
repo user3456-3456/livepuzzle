@@ -3,6 +3,7 @@ console.log("LivePuzzle loaded")
 
 document.addEventListener('DOMContentLoaded', () => {
   const gameContainer = document.getElementById('game-container');
+  renderLeaderboardPanel();
 
   let appState = 'capture'; // 'capture' or 'solve'
 
@@ -237,6 +238,9 @@ document.addEventListener('DOMContentLoaded', () => {
   function showCompleteScreen() {
     document.getElementById('mode-panel').textContent = 'MODE: COMPLETE';
 
+    // Save personal best
+    savePersonalBest(puzzleElapsed);
+
     // Ascending completion tones
     playTone(400, 0.1, 0.2);
     setTimeout(() => playTone(600, 0.1, 0.2), 120);
@@ -299,16 +303,82 @@ document.addEventListener('DOMContentLoaded', () => {
       font-weight: 700;
     `;
 
-    // Time display
+    // MM:SS formatted time
     const mins = String(Math.floor(puzzleElapsed / 60)).padStart(2, '0');
     const secs = String(puzzleElapsed % 60).padStart(2, '0');
+    const finalTime = `${mins}:${secs}`;
+
+    // Time display
     const timeDisplay = document.createElement('div');
-    timeDisplay.textContent = `⏱ ${mins}:${secs}`;
+    timeDisplay.textContent = `⏱ ${finalTime}`;
     timeDisplay.style.cssText = `
       color: #00FF00;
       font-size: 0.75rem;
       letter-spacing: 0.2em;
     `;
+
+    // Submission UI
+    const subContainer = document.createElement('div');
+    subContainer.style.cssText = 'display: flex; flex-direction: column; align-items: center; gap: 8px; margin: 4px 0;';
+
+    const nameInput = document.createElement('input');
+    nameInput.placeholder = 'ENTER NAME (OPTIONAL)';
+    nameInput.maxLength = 12;
+    nameInput.style.cssText = `
+      background: transparent;
+      border: none;
+      border-bottom: 1px solid #00FF00;
+      color: #00FF00;
+      font-family: 'Space Mono', monospace;
+      font-size: 0.6rem;
+      letter-spacing: 0.15em;
+      padding: 6px;
+      outline: none;
+      text-align: center;
+      width: 180px;
+      text-transform: uppercase;
+    `;
+
+    const submitBtn = document.createElement('button');
+    submitBtn.textContent = 'SUBMIT';
+    submitBtn.style.cssText = `
+      background: transparent;
+      border: 1px solid #00FF00;
+      color: #00FF00;
+      font-family: 'Space Mono', monospace;
+      font-size: 0.6rem;
+      letter-spacing: 0.2em;
+      padding: 8px 16px;
+      cursor: pointer;
+      min-height: 44px;
+      white-space: nowrap;
+    `;
+
+    submitBtn.addEventListener('click', async () => {
+      const name = nameInput.value.trim().toUpperCase();
+      if (name) {
+        submitBtn.disabled = true;
+        submitBtn.style.opacity = '0.5';
+        submitBtn.textContent = 'SAVING...';
+        try {
+          await db.collection('leaderboard').add({
+            name: name,
+            seconds: puzzleElapsed,
+            timestamp: firebase.firestore.FieldValue.serverTimestamp()
+          });
+          submitBtn.textContent = 'SAVED';
+        } catch (e) {
+          console.error('Firestore save error:', e);
+          submitBtn.disabled = false;
+          submitBtn.style.opacity = '1';
+          submitBtn.textContent = 'RETRY';
+        }
+      }
+      renderLeaderboardPanel();
+    });
+
+    subContainer.appendChild(nameInput);
+    subContainer.appendChild(submitBtn);
 
     // Play Again button
     const playAgainBtn = document.createElement('button');
@@ -338,14 +408,97 @@ document.addEventListener('DOMContentLoaded', () => {
       if (retakeBtn) retakeBtn.remove();
       appState = 'capture';
       document.getElementById('mode-panel').textContent = 'MODE: CAPTURE';
+      renderLeaderboardPanel();
     });
 
     card.appendChild(trophy);
     card.appendChild(completeText);
     card.appendChild(timeDisplay);
+    card.appendChild(subContainer);
     card.appendChild(playAgainBtn);
     overlay.appendChild(card);
     document.getElementById('app').appendChild(overlay);
+  }
+
+  // --- Personal Best Helpers ---
+  function getPersonalBest() {
+    const val = localStorage.getItem('livepuzzle_best');
+    return val ? parseInt(val, 10) : null;
+  }
+
+  function savePersonalBest(seconds) {
+    const currentBest = getPersonalBest();
+    if (currentBest === null || seconds < currentBest) {
+      localStorage.setItem('livepuzzle_best', seconds);
+    }
+  }
+
+  // --- Leaderboard Panel ---
+  async function renderLeaderboardPanel() {
+    let panel = document.getElementById('leaderboard-panel');
+    if (!panel) {
+      panel = document.createElement('div');
+      panel.id = 'leaderboard-panel';
+      panel.style.cssText = `
+        position: absolute;
+        left: 12px;
+        top: 50%;
+        transform: translateY(-50%);
+        z-index: 50;
+        background: rgba(0,0,0,0.6);
+        border: 1px solid #00FF00;
+        padding: 12px;
+        min-width: 140px;
+        font-family: 'Space Mono', monospace;
+      `;
+      document.getElementById('app').appendChild(panel);
+    }
+
+    // Header
+    panel.innerHTML = `
+      <div style="color: #00FF00; font-size: 0.55rem; letter-spacing: 0.2em; margin-bottom: 8px; font-weight: 700;">TOP 5</div>
+      <div id="leaderboard-entries"></div>
+      <div style="border-top: 1px solid rgba(0,255,0,0.3); margin: 8px 0;"></div>
+      <div style="color: rgba(0,255,0,0.6); font-size: 0.45rem; letter-spacing: 0.1em; margin-bottom: 2px;">YOUR BEST</div>
+      <div id="personal-best-display" style="color: #00FF00; font-size: 0.5rem;"></div>
+    `;
+
+    const entriesDiv = document.getElementById('leaderboard-entries');
+    const pbDiv = document.getElementById('personal-best-display');
+
+    // MM:SS formatter
+    const formatTime = (s) => {
+      const mins = String(Math.floor(s / 60)).padStart(2, '0');
+      const secs = String(s % 60).padStart(2, '0');
+      return `${mins}:${secs}`;
+    };
+
+    // Render Personal Best
+    const pb = getPersonalBest();
+    pbDiv.textContent = pb !== null ? formatTime(pb) : "- -:- -";
+
+    // Fetch and Render Global Top 5
+    try {
+      const snapshot = await db.collection('leaderboard')
+        .orderBy('seconds', 'asc')
+        .limit(5)
+        .get();
+      
+      let html = '';
+      snapshot.docs.forEach((doc, idx) => {
+        const data = doc.data();
+        html += `
+          <div style="color: #00FF00; font-size: 0.5rem; line-height: 2; display: flex; justify-content: space-between;">
+            <span>${idx + 1}. ${data.name}</span>
+            <span>${formatTime(data.seconds)}</span>
+          </div>
+        `;
+      });
+      entriesDiv.innerHTML = html || '<div style="color: rgba(0,255,0,0.4); font-size: 0.45rem;">NO SUBMISSIONS</div>';
+    } catch (e) {
+      console.error('Firestore load error:', e);
+      entriesDiv.innerHTML = '<div style="color: #FF0000; font-size: 0.45rem;">LOAD ERROR</div>';
+    }
   }
 
   // --- MediaPipe Hands ---
