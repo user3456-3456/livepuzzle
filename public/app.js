@@ -137,7 +137,7 @@ document.addEventListener('DOMContentLoaded', () => {
     };
   }
 
-  // --- Puzzle render loop ---
+  // --- Puzzle render loop (camera + timing only) ---
   function drawPuzzleFrame() {
     if (appState !== 'solve') return;
 
@@ -147,52 +147,14 @@ document.addEventListener('DOMContentLoaded', () => {
     // Update elapsed timer
     puzzleElapsed = Math.floor((Date.now() - puzzleStartTime) / 1000);
 
-    // Clear both canvases
+    // Clear and redraw mirrored camera feed on video canvas
     videoCtx.clearRect(0, 0, w, h);
-    overlayCtx.clearRect(0, 0, w, h);
-
-    // Draw latest mirrored camera frame onto video canvas
     if (window._lastHandsImage) {
       videoCtx.save();
       videoCtx.scale(-1, 1);
       videoCtx.drawImage(window._lastHandsImage, -w, 0, w, h);
       videoCtx.restore();
     }
-
-    // Draw the 9 tiles in their shuffled positions
-    for (let i = 0; i < tiles.length; i++) {
-      if (dragTile && dragTile.tileIndex === i) continue; // draw dragged tile last
-      const col = tiles[i].current % 3;
-      const row = Math.floor(tiles[i].current / 3);
-      const dx = gridX + col * tileW;
-      const dy = gridY + row * tileH;
-      overlayCtx.drawImage(tiles[i].canvas, dx, dy, tileW, tileH);
-      overlayCtx.strokeStyle = '#ffffff';
-      overlayCtx.lineWidth = 1;
-      overlayCtx.strokeRect(dx, dy, tileW, tileH);
-    }
-
-    // Draw dragged tile on top with glow
-    if (dragTile !== null) {
-      const t = tiles[dragTile.tileIndex];
-      const scale = 1.1;
-      const dw = tileW * scale;
-      const dh = tileH * scale;
-      const dx = dragTile.currentX - dw / 2;
-      const dy = dragTile.currentY - dh / 2;
-      overlayCtx.save();
-      overlayCtx.shadowBlur = 20;
-      overlayCtx.shadowColor = '#00FF00';
-      overlayCtx.drawImage(t.canvas, dx, dy, dw, dh);
-      overlayCtx.restore();
-    }
-
-    // Draw MM:SS timer top-left
-    const mins = String(Math.floor(puzzleElapsed / 60)).padStart(2, '0');
-    const secs = String(puzzleElapsed % 60).padStart(2, '0');
-    overlayCtx.fillStyle = '#00FF00';
-    overlayCtx.font = '14px Space Mono';
-    overlayCtx.fillText(`${mins}:${secs}`, 8, 22);
 
     requestAnimationFrame(drawPuzzleFrame);
   }
@@ -258,10 +220,50 @@ document.addEventListener('DOMContentLoaded', () => {
     // Always cache the latest camera frame for drawPuzzleFrame
     window._lastHandsImage = results.image;
 
-    // In solve mode, drawPuzzleFrame owns both canvases — handle landmarks + drag here
+    // In solve mode: clear overlay, draw tiles, draw landmarks on top, run drag logic
     if (appState === 'solve') {
+      // 1. Clear overlay every frame to prevent ghosting
+      overlayCtx.clearRect(0, 0, overlayCanvas.width, overlayCanvas.height);
+
+      // 2. Draw the 9 tiles in their shuffled grid positions
+      for (let i = 0; i < tiles.length; i++) {
+        if (dragTile && dragTile.tileArrayIndex === i) continue; // dragged tile drawn last
+        const col = tiles[i].current % 3;
+        const row = Math.floor(tiles[i].current / 3);
+        const tx = gridX + col * tileW;
+        const ty = gridY + row * tileH;
+        overlayCtx.drawImage(tiles[i].canvas, tx, ty, tileW, tileH);
+        overlayCtx.strokeStyle = '#ffffff';
+        overlayCtx.lineWidth = 1;
+        overlayCtx.strokeRect(tx, ty, tileW, tileH);
+      }
+
+      // 3. Draw dragged tile on top with glow, then reset shadow
+      if (dragTile !== null) {
+        const t = tiles[dragTile.tileArrayIndex];
+        const scale = 1.1;
+        const dw = tileW * scale;
+        const dh = tileH * scale;
+        const dx = dragTile.currentX - dw / 2;
+        const dy = dragTile.currentY - dh / 2;
+        overlayCtx.save();
+        overlayCtx.shadowBlur = 20;
+        overlayCtx.shadowColor = '#00FF00';
+        overlayCtx.drawImage(t.canvas, dx, dy, dw, dh);
+        overlayCtx.restore();
+        overlayCtx.shadowBlur = 0;
+        overlayCtx.shadowColor = 'transparent';
+      }
+
+      // 4. Draw MM:SS timer top-left
+      const mins = String(Math.floor(puzzleElapsed / 60)).padStart(2, '0');
+      const secs = String(puzzleElapsed % 60).padStart(2, '0');
+      overlayCtx.fillStyle = '#00FF00';
+      overlayCtx.font = '14px Space Mono';
+      overlayCtx.fillText(`${mins}:${secs}`, 8, 22);
+
       if (results.multiHandLandmarks) {
-        // Draw hand skeletons in mirrored space
+        // 5. Draw hand skeletons in mirrored space (on top of tiles)
         overlayCtx.save();
         overlayCtx.scale(-1, 1);
         overlayCtx.translate(-overlayCanvas.width, 0);
