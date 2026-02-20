@@ -47,6 +47,10 @@ document.addEventListener('DOMContentLoaded', () => {
   //  REGISTRATION OVERLAY
   // ==========================================================================
   function showRegistrationOverlay() {
+    // Hide the mode-panel so it doesn't bleed through the overlay
+    const modePanel = document.getElementById('mode-panel');
+    if (modePanel) modePanel.style.display = 'none';
+
     const overlay = document.createElement('div');
     overlay.id = 'reg-overlay';
     overlay.style.cssText = `
@@ -140,6 +144,7 @@ document.addEventListener('DOMContentLoaded', () => {
         console.error('Firestore user save error:', e);
       }
       overlay.remove();
+      if (modePanel) modePanel.style.display = '';
       initGame();
     });
 
@@ -155,6 +160,7 @@ document.addEventListener('DOMContentLoaded', () => {
     skipLink.addEventListener('click', () => {
       localStorage.setItem('livepuzzle_username', '');
       overlay.remove();
+      if (modePanel) modePanel.style.display = '';
       initGame();
     });
 
@@ -722,6 +728,86 @@ document.addEventListener('DOMContentLoaded', () => {
         <div style="color: rgba(0,255,0,0.6); font-size: 0.55rem; letter-spacing: 0.1em; margin-bottom: 2px;">GAMES PLAYED</div>
         <div style="color: #00FF00; font-size: 0.65rem;">${gamesPlayed}</div>
       `;
+
+      // If guest, show callsign upgrade section
+      if (!currentUsername || currentUsername.length === 0) {
+        const divider = document.createElement('div');
+        divider.style.cssText = 'border-top: 1px solid rgba(0,255,0,0.3); margin: 10px 0;';
+
+        const upgradeLabel = document.createElement('div');
+        upgradeLabel.style.cssText = 'color: rgba(0,255,0,0.5); font-size: 0.45rem; letter-spacing: 0.1em; margin-bottom: 6px;';
+        upgradeLabel.textContent = 'JOIN LEADERBOARD';
+
+        const callsignInput = document.createElement('input');
+        callsignInput.maxLength = 12;
+        callsignInput.placeholder = 'YOUR NAME';
+        callsignInput.style.cssText = `
+          background: transparent; border: none;
+          border-bottom: 1px solid #00FF00; color: #00FF00;
+          font-family: 'Space Mono', monospace; font-size: 0.6rem;
+          letter-spacing: 0.1em; padding: 4px; outline: none;
+          text-align: center; width: 100%; text-transform: uppercase;
+          margin-bottom: 6px; display: block;
+        `;
+
+        const saveBtn = document.createElement('button');
+        saveBtn.textContent = 'SAVE';
+        saveBtn.style.cssText = `
+          background: transparent; border: 1px solid #00FF00;
+          color: #00FF00; font-family: 'Space Mono', monospace;
+          font-size: 0.5rem; letter-spacing: 0.15em;
+          padding: 5px 12px; cursor: pointer; width: 100%;
+        `;
+
+        const errorMsg = document.createElement('div');
+        errorMsg.style.cssText = 'color: #FF0000; font-size: 0.45rem; min-height: 1em; margin-top: 4px; text-align: center;';
+
+        saveBtn.addEventListener('click', async () => {
+          const name = callsignInput.value.trim().toUpperCase();
+          if (!name) {
+            callsignInput.style.borderBottomColor = '#FF0000';
+            setTimeout(() => { callsignInput.style.borderBottomColor = '#00FF00'; }, 400);
+            return;
+          }
+          saveBtn.disabled = true;
+          saveBtn.textContent = 'SAVING...';
+          try {
+            // Save to Firestore users collection
+            await db.collection('users').add({
+              name: name,
+              createdAt: firebase.firestore.FieldValue.serverTimestamp()
+            });
+          } catch (e) {
+            console.error('Firestore user save error:', e);
+            // Don't block — continue with localStorage save
+          }
+          localStorage.setItem('livepuzzle_username', name);
+
+          // If they have a personal best, submit it to the leaderboard now
+          if (personalBest !== null) {
+            try {
+              const existing = await db.collection('leaderboard').where('name', '==', name).get();
+              if (existing.empty) {
+                await db.collection('leaderboard').add({
+                  name: name,
+                  seconds: personalBest,
+                  timestamp: firebase.firestore.FieldValue.serverTimestamp()
+                });
+              }
+            } catch (e) {
+              console.error('Firestore leaderboard save error:', e);
+            }
+          }
+
+          renderLeaderboardPanel();
+        });
+
+        personalPanel.appendChild(divider);
+        personalPanel.appendChild(upgradeLabel);
+        personalPanel.appendChild(callsignInput);
+        personalPanel.appendChild(saveBtn);
+        personalPanel.appendChild(errorMsg);
+      }
     }
 
     // --- Per-hand pinch state for smoothing, hysteresis, and debounce ---
@@ -784,7 +870,20 @@ document.addEventListener('DOMContentLoaded', () => {
         overlayCtx.font = '14px Space Mono';
         overlayCtx.fillText(`${mins}:${secs}`, 8, 22);
 
+        // Safety: if no hands detected at all, snap any floating tile back
+        if (!results.multiHandLandmarks || results.multiHandLandmarks.length === 0) {
+          if (dragTile !== null) dragTile = null;
+        }
+
         if (results.multiHandLandmarks) {
+          // Safety release: if the hand that owns the drag is no longer detected, snap tile back
+          if (dragTile !== null) {
+            const ownerStillDetected = results.multiHandLandmarks.length > dragTile.handIndex;
+            if (!ownerStillDetected) {
+              dragTile = null;
+            }
+          }
+
           // 5. Draw hand skeletons in mirrored space (on top of tiles)
           overlayCtx.save();
           overlayCtx.scale(-1, 1);
