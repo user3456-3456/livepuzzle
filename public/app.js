@@ -197,6 +197,48 @@ document.addEventListener('DOMContentLoaded', () => {
     requestAnimationFrame(drawPuzzleFrame);
   }
 
+  // --- Helper: find which tile occupies a canvas point ---
+  function getTileAtPosition(canvasX, canvasY) {
+    const col = Math.floor((canvasX - gridX) / tileW);
+    const row = Math.floor((canvasY - gridY) / tileH);
+    if (col < 0 || col > 2 || row < 0 || row > 2) return null;
+    const gridPos = row * 3 + col;
+    return tiles.findIndex(tile => tile.current === gridPos);
+  }
+
+  // --- Helper: play a short sine tone ---
+  function playTone(freq, duration, gain) {
+    try {
+      const audioCtx = new (window.AudioContext || window.webkitAudioContext)();
+      const osc = audioCtx.createOscillator();
+      const g = audioCtx.createGain();
+      osc.connect(g);
+      g.connect(audioCtx.destination);
+      osc.type = 'sine';
+      osc.frequency.setValueAtTime(freq, audioCtx.currentTime);
+      g.gain.setValueAtTime(gain, audioCtx.currentTime);
+      osc.start();
+      osc.stop(audioCtx.currentTime + duration);
+    } catch (e) {
+      console.warn('Audio failed:', e);
+    }
+  }
+
+  // --- Check if puzzle is solved after every swap ---
+  function checkPuzzleSolved() {
+    const solved = tiles.every(tile => tile.correct === tile.current);
+    if (solved) {
+      appState = 'complete';
+      puzzleElapsed = Math.floor((Date.now() - puzzleStartTime) / 1000);
+      showCompleteScreen();
+    }
+  }
+
+  // --- Placeholder: complete screen ---
+  function showCompleteScreen() {
+    console.log('Puzzle complete in', puzzleElapsed, 'seconds');
+  }
+
   // --- MediaPipe Hands ---
   const hands = new Hands({
     locateFile: (file) => `https://cdn.jsdelivr.net/npm/@mediapipe/hands/${file}`,
@@ -216,11 +258,10 @@ document.addEventListener('DOMContentLoaded', () => {
     // Always cache the latest camera frame for drawPuzzleFrame
     window._lastHandsImage = results.image;
 
-    // In solve mode, drawPuzzleFrame owns both canvases — only handle hand landmarks here
+    // In solve mode, drawPuzzleFrame owns both canvases — handle landmarks + drag here
     if (appState === 'solve') {
       if (results.multiHandLandmarks) {
-        // Skeleton overlay is drawn by drawPuzzleFrame via the rAF loop,
-        // but we still draw landmarks onto overlayCtx for real-time feedback
+        // Draw hand skeletons in mirrored space
         overlayCtx.save();
         overlayCtx.scale(-1, 1);
         overlayCtx.translate(-overlayCanvas.width, 0);
@@ -236,6 +277,55 @@ document.addEventListener('DOMContentLoaded', () => {
           });
         }
         overlayCtx.restore();
+
+        // --- Pinch-drag logic ---
+        for (let handIndex = 0; handIndex < results.multiHandLandmarks.length; handIndex++) {
+          const landmarks = results.multiHandLandmarks[handIndex];
+
+          // Mirrored canvas coordinates for index tip and thumb tip
+          const rawIndex = getLandmarkPoint(landmarks[8], w, h);
+          const rawThumb = getLandmarkPoint(landmarks[4], w, h);
+          const indexX = w - rawIndex.x;
+          const indexY = rawIndex.y;
+          const thumbX = w - rawThumb.x;
+          const thumbY = rawThumb.y;
+
+          const dx = indexX - thumbX;
+          const dy = indexY - thumbY;
+          const pinchDist = Math.sqrt(dx * dx + dy * dy);
+          const midX = (indexX + thumbX) / 2;
+          const midY = (indexY + thumbY) / 2;
+          const isPinching = pinchDist < 30;
+
+          if (isPinching) {
+            if (dragTile === null) {
+              // PINCH START — only pick up if no tile is being dragged
+              const tileIdx = getTileAtPosition(midX, midY);
+              if (tileIdx !== null && tileIdx !== -1) {
+                dragTile = { tileArrayIndex: tileIdx, currentX: midX, currentY: midY, handIndex };
+                playTone(600, 0.08, 0.2);
+              }
+            } else if (dragTile.handIndex === handIndex) {
+              // DRAGGING — update position for the hand that started the drag
+              dragTile.currentX = midX;
+              dragTile.currentY = midY;
+            }
+          } else {
+            // RELEASE — only if this hand owns the drag
+            if (dragTile !== null && dragTile.handIndex === handIndex) {
+              const targetIdx = getTileAtPosition(dragTile.currentX, dragTile.currentY);
+              if (targetIdx !== null && targetIdx !== -1 && targetIdx !== dragTile.tileArrayIndex) {
+                // Swap .current values
+                const temp = tiles[dragTile.tileArrayIndex].current;
+                tiles[dragTile.tileArrayIndex].current = tiles[targetIdx].current;
+                tiles[targetIdx].current = temp;
+                playTone(400, 0.06, 0.15);
+                checkPuzzleSolved();
+              }
+              dragTile = null;
+            }
+          }
+        }
       }
       return;
     }
