@@ -73,6 +73,43 @@ document.addEventListener('DOMContentLoaded', () => {
     appState = 'solve';
     document.getElementById('mode-panel').textContent = 'MODE: SOLVE';
 
+    // Retake button (only injected once per session)
+    if (!window._retakeShown) {
+      window._retakeShown = true;
+      const retakeBtn = document.createElement('button');
+      retakeBtn.id = 'retake-btn';
+      retakeBtn.textContent = 'RETAKE';
+      retakeBtn.style.cssText = `
+        position: absolute;
+        bottom: 16px;
+        left: 50%;
+        transform: translateX(-50%);
+        background: transparent;
+        border: 1px solid #00FF00;
+        color: #00FF00;
+        font-family: 'Space Mono', monospace;
+        font-size: 0.6rem;
+        letter-spacing: 0.2em;
+        padding: 8px 20px;
+        cursor: pointer;
+        min-height: 44px;
+        white-space: nowrap;
+        z-index: 50;
+      `;
+      retakeBtn.addEventListener('click', () => {
+        tiles = [];
+        dragTile = null;
+        puzzleStartTime = null;
+        puzzleElapsed = 0;
+        window.capturedImage = null;
+        window._retakeShown = false;
+        retakeBtn.remove();
+        appState = 'capture';
+        document.getElementById('mode-panel').textContent = 'MODE: CAPTURE';
+      });
+      document.getElementById('app').appendChild(retakeBtn);
+    }
+
     // Short 800 Hz beep via Web Audio API
     try {
       const audioCtx = new (window.AudioContext || window.webkitAudioContext)();
@@ -198,7 +235,117 @@ document.addEventListener('DOMContentLoaded', () => {
 
   // --- Placeholder: complete screen ---
   function showCompleteScreen() {
-    console.log('Puzzle complete in', puzzleElapsed, 'seconds');
+    document.getElementById('mode-panel').textContent = 'MODE: COMPLETE';
+
+    // Ascending completion tones
+    playTone(400, 0.1, 0.2);
+    setTimeout(() => playTone(600, 0.1, 0.2), 120);
+    setTimeout(() => playTone(800, 0.2, 0.3), 240);
+
+    // Outer overlay
+    const overlay = document.createElement('div');
+    overlay.id = 'complete-overlay';
+    overlay.style.cssText = `
+      position: absolute;
+      top: 0; left: 0; width: 100%; height: 100%;
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      justify-content: center;
+      background: rgba(0,0,0,0.0);
+      z-index: 100;
+      font-family: 'Space Mono', monospace;
+    `;
+
+    // Blurred camera snapshot as background
+    const bgCanvas = document.createElement('canvas');
+    bgCanvas.width = 640;
+    bgCanvas.height = 480;
+    bgCanvas.style.cssText = `
+      position: absolute;
+      top: 50%; left: 50%;
+      transform: translate(-50%, -50%);
+      filter: blur(8px);
+      z-index: 0;
+    `;
+    const bgCtx = bgCanvas.getContext('2d');
+    bgCtx.drawImage(videoCanvas, 0, 0);
+    overlay.appendChild(bgCanvas);
+
+    // Card
+    const card = document.createElement('div');
+    card.style.cssText = `
+      position: relative;
+      z-index: 1;
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      gap: 12px;
+      padding: 32px 48px;
+    `;
+
+    // Trophy emoji
+    const trophy = document.createElement('div');
+    trophy.textContent = '🏆';
+    trophy.style.cssText = 'font-size: 2.5rem; filter: drop-shadow(0 0 8px #00FF00);';
+
+    // COMPLETE! label
+    const completeText = document.createElement('div');
+    completeText.textContent = 'COMPLETE!';
+    completeText.style.cssText = `
+      color: #00FF00;
+      font-size: 1.1rem;
+      letter-spacing: 0.3em;
+      font-weight: 700;
+    `;
+
+    // Time display
+    const mins = String(Math.floor(puzzleElapsed / 60)).padStart(2, '0');
+    const secs = String(puzzleElapsed % 60).padStart(2, '0');
+    const timeDisplay = document.createElement('div');
+    timeDisplay.textContent = `⏱ ${mins}:${secs}`;
+    timeDisplay.style.cssText = `
+      color: #00FF00;
+      font-size: 0.75rem;
+      letter-spacing: 0.2em;
+    `;
+
+    // Play Again button
+    const playAgainBtn = document.createElement('button');
+    playAgainBtn.textContent = 'PLAY AGAIN';
+    playAgainBtn.style.cssText = `
+      margin-top: 8px;
+      background: transparent;
+      border: 1px solid #00FF00;
+      color: #00FF00;
+      font-family: 'Space Mono', monospace;
+      font-size: 0.65rem;
+      letter-spacing: 0.2em;
+      padding: 10px 24px;
+      cursor: pointer;
+      min-height: 44px;
+      white-space: nowrap;
+    `;
+    playAgainBtn.addEventListener('click', () => {
+      overlay.remove();
+      tiles = [];
+      dragTile = null;
+      puzzleStartTime = null;
+      puzzleElapsed = 0;
+      window.capturedImage = null;
+      window._retakeShown = false;
+      const retakeBtn = document.getElementById('retake-btn');
+      if (retakeBtn) retakeBtn.remove();
+      appState = 'capture';
+      document.getElementById('mode-panel').textContent = 'MODE: CAPTURE';
+    });
+
+    card.appendChild(trophy);
+    card.appendChild(completeText);
+    card.appendChild(timeDisplay);
+    card.appendChild(playAgainBtn);
+    overlay.appendChild(card);
+    document.getElementById('app').appendChild(overlay);
   }
 
   // --- MediaPipe Hands ---
