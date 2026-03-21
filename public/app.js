@@ -174,6 +174,32 @@ document.addEventListener('DOMContentLoaded', () => {
     const gameContainer = document.getElementById('game-container');
     renderLeaderboardPanel();
 
+    // --- Contextual hint element ---
+    const hintEl = document.createElement('div');
+    hintEl.id = 'hint-text';
+    hintEl.style.cssText = `
+      position: absolute;
+      top: 68px;
+      left: 50%;
+      transform: translateX(-50%);
+      color: #00FF00;
+      font-size: 0.85rem;
+      font-weight: 700;
+      font-family: 'Space Mono', monospace;
+      letter-spacing: 0.25em;
+      text-align: center;
+      white-space: nowrap;
+      z-index: 60;
+      text-shadow: 0 0 12px rgba(0,255,0,0.5);
+      transition: opacity 0.3s ease;
+    `;
+    hintEl.textContent = 'RAISE BOTH HANDS INTO VIEW';
+    document.getElementById('app').appendChild(hintEl);
+
+    function setHint(text) {
+      hintEl.textContent = text;
+    }
+
     let appState = 'capture'; // 'capture' or 'solve'
 
     // --- Puzzle state ---
@@ -238,6 +264,7 @@ document.addEventListener('DOMContentLoaded', () => {
 
       appState = 'solve';
       document.getElementById('mode-panel').textContent = 'MODE: SOLVE';
+      setHint('PINCH A TILE TO GRAB IT');
 
       // Retake button (only injected once per session)
       if (!window._retakeShown) {
@@ -272,6 +299,7 @@ document.addEventListener('DOMContentLoaded', () => {
           window._retakeShown = false;
           retakeBtn.remove();
           appState = 'capture';
+          setHint('RAISE BOTH HANDS INTO VIEW');
           document.getElementById('mode-panel').textContent = 'MODE: CAPTURE';
         });
         document.getElementById('app').appendChild(retakeBtn);
@@ -402,6 +430,7 @@ document.addEventListener('DOMContentLoaded', () => {
 
         appState = 'complete';
         puzzleElapsed = Math.floor((Date.now() - puzzleStartTime) / 1000);
+        setHint('PUZZLE SOLVED — WELL DONE!');
         showCompleteScreen();
       }
     }
@@ -567,6 +596,7 @@ document.addEventListener('DOMContentLoaded', () => {
         const retakeBtn = document.getElementById('retake-btn');
         if (retakeBtn) retakeBtn.remove();
         appState = 'capture';
+        setHint('RAISE BOTH HANDS INTO VIEW');
         document.getElementById('mode-panel').textContent = 'MODE: CAPTURE';
         renderLeaderboardPanel();
       });
@@ -789,17 +819,7 @@ document.addEventListener('DOMContentLoaded', () => {
         overlayCtx.font = '14px Space Mono';
         overlayCtx.fillText(`${mins}:${secs}`, 8, 22);
 
-        // Safety: no hands detected — snap floating tile back
-        if (!results.multiHandLandmarks || results.multiHandLandmarks.length === 0) {
-          if (dragTile !== null) dragTile = null;
-        }
-
         if (results.multiHandLandmarks) {
-          // Safety: owning hand dropped out — snap tile back
-          if (dragTile !== null && results.multiHandLandmarks.length <= dragTile.handIndex) {
-            dragTile = null;
-          }
-
           // 5. Draw hand skeletons in mirrored space (on top of tiles)
           overlayCtx.save();
           overlayCtx.scale(-1, 1);
@@ -873,6 +893,7 @@ document.addEventListener('DOMContentLoaded', () => {
                   if (tileIdx !== null && tileIdx !== -1) {
                     dragTile = { tileArrayIndex: tileIdx, currentX: midX, currentY: midY, handIndex };
                     playTone(600, 0.08, 0.2);
+                    setHint('DRAG IT TO SWAP POSITIONS');
                   }
                 } else if (dragTile.handIndex === handIndex) {
                   // DRAGGING — update position with latest midpoint (no debounce on position)
@@ -892,6 +913,7 @@ document.addEventListener('DOMContentLoaded', () => {
                     checkPuzzleSolved();
                   }
                   dragTile = null;
+                  setHint('PINCH A TILE TO GRAB IT');
                 }
               }
             }
@@ -908,6 +930,14 @@ document.addEventListener('DOMContentLoaded', () => {
 
       // Clear overlay
       overlayCtx.clearRect(0, 0, w, h);
+
+      // --- Capture mode hint: react to hand count ---
+      if (appState === 'capture') {
+        const handCount = (results.multiHandLandmarks) ? results.multiHandLandmarks.length : 0;
+        if (handCount === 0) setHint('RAISE BOTH HANDS INTO VIEW');
+        else if (handCount === 1) setHint('RAISE YOUR OTHER HAND TOO');
+        else setHint('PINCH BOTH FINGERS TO CAPTURE');
+      }
 
       if (results.multiHandLandmarks) {
         // Draw skeleton in mirrored space
